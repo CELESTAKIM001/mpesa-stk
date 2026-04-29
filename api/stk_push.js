@@ -63,13 +63,13 @@ module.exports = async (req, res) => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          BusinessShortCode: SHORTCODE,
+          BusinessShortCode: '4574727',
           Password: password,
           Timestamp: timestamp,
           TransactionType: 'CustomerBuyGoodsOnline',
           Amount: parseInt(amount),
           PartyA: phone,
-          PartyB: 4574727,
+          PartyB: '4574727',
           PhoneNumber: phone,
           CallBackURL: CALLBACK_URL,
           AccountReference: 'GeopramGifts',
