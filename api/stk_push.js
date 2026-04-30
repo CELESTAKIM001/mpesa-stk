@@ -69,7 +69,7 @@ module.exports = async (req, res) => {
           TransactionType: 'CustomerBuyGoodsOnline',
           Amount: parseInt(amount),
           PartyA: phone,
-          PartyB: '4574727',
+          PartyB: '5367886',
           PhoneNumber: phone,
           CallBackURL: CALLBACK_URL,
           AccountReference: 'GeopramGifts',
