@@ -8,13 +8,14 @@
   },
   "scripts": {
     "start": "vercel dev",
-    "check": "node --check api/stk_push.js && node --check api/callback.js && node --check api/transaction-status.js && node --check api/websites.js && node --check api/admin/login.js && node --check api/admin/records.js && node --check api/admin/websites.js && node --check api/admin/send-receipt.js && node --check api/admin/document.js"
+    "check": "node --check api/stk_push.js && node --check api/callback.js && node --check api/transaction-status.js && node --check api/websites.js && node --check api/admin/login.js && node --check api/admin/records.js && node --check api/admin/websites.js && node --check api/admin/send-receipt.js && node --check api/admin/document.js && node --check api/verify-document.js"
   },
   "dependencies": {
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.8.0",
     "pdfkit": "^0.15.0",
-    "nodemailer": "^6.9.15"
+    "nodemailer": "^6.9.15",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "vercel": "^39.1.1"

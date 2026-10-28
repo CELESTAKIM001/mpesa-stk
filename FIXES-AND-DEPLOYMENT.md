@@ -51,3 +51,11 @@ That customer-facing message alone does not prove the exact root cause. This ver
 ## Payment prompt and status popup fix
 
 The public payment page now opens a responsive status modal immediately after Daraja accepts an STK Push. It tells the customer to check their phone and verify the amount and Till before entering a PIN. It then polls the transaction status and displays successful, failed, or cancelled states when the callback has been saved. If Safaricom accepted the request but MongoDB failed immediately afterward, the STK endpoint returns the accepted checkout reference instead of incorrectly telling the customer that the payment could not be started; tracking may be delayed until the callback is stored. This cannot manufacture a Safaricom result: final status still depends on the real callback/database result.
+
+
+## Branded PDF verification QR
+- Set `APP_BASE_URL` to your public HTTPS deployment URL (no trailing slash).
+- Install dependencies on deployment; `qrcode` is required to embed QR images in generated PDFs.
+- PDFs include the server-created timestamp in Africa/Nairobi time and a QR link to `/verify.html`.
+- The verification endpoint matches both document number and a secret random token. A receipt linked to a transaction is only issued when the transaction status is `paid`.
+- Document type remains selectable; a transaction reference can be supplied when creating any document, but only a receipt enforces paid status.
