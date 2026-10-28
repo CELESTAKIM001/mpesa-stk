@@ -60,22 +60,22 @@ module.exports = async (req, res) => {
       try {
         const pdfBuffer = Buffer.concat(chunks);
         if (b.sendEmail) {
-          const recipientEmail = String(recipientEmail || '').trim();
+          const emailTo = String(recipientEmail || '').trim();
           const title = titleMap[b.type] || 'GEOPRAM DOCUMENT';
           await sendMail({
-            to: recipientEmail,
+            to: emailTo,
             subject: `${title} - ${docNo}`,
             text: `Hello ${esc(recipient)},\n\nPlease find attached your ${title.toLowerCase()}.\nDocument number: ${docNo}\nIssued by ${company}.\n\nRegards,\n${company}`,
             html: `<div style="font-family:Arial,sans-serif;color:#172033;max-width:620px;margin:auto;border:1px solid #e4e8ef;border-radius:12px;overflow:hidden"><div style="background:#081321;padding:22px 26px;border-bottom:5px solid #e50914"><div style="font-size:22px;font-weight:800;color:#fff">${company}</div><div style="color:#d8e0ea;font-size:12px;margin-top:5px">Official document delivery</div></div><div style="padding:26px"><p>Hello ${String(recipient).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]))},</p><p>Please find your <b>${title.toLowerCase()}</b> attached to this email.</p><p style="padding:14px;background:#f5f7fa;border-radius:8px"><b>Document number:</b> ${docNo}</p><p>Thank you for choosing ${company}.</p></div></div>` ,
             attachments: [{ filename: `${docNo}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }]
           });
-          await db.collection('documents').updateOne({ documentNumber: docNo }, { $set: { emailedAt: new Date(), emailedTo: recipientEmail } });
+          await db.collection('documents').updateOne({ documentNumber: docNo }, { $set: { emailedAt: new Date(), emailedTo: emailTo } });
         }
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${docNo}.pdf"`);
         res.status(200).send(pdfBuffer);
       } catch (mailError) {
-        console.error('Document email failed:', mailError.message);
+        console.error('Document email failed:', JSON.stringify({ message: mailError.message, code: mailError.code, command: mailError.command, responseCode: mailError.responseCode }));
         if (!res.headersSent) res.status(502).json({ error: 'The PDF was created, but email delivery failed. Check SMTP settings and try again.' });
       }
     });
