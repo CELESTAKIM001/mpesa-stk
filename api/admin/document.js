@@ -1,6 +1,9 @@
 const { getDb } = require('../../lib/db');
 const { requireAdmin } = require('../../lib/auth');
 const PDFDocument = require('pdfkit');
+const path = require('path');
+const fs = require('fs');
+const { sendMail } = require('../../lib/mailer');
 const { randomUUID } = require('crypto');
 const esc = s => String(s ?? '').trim().slice(0, 500);
 module.exports = async (req, res) => {
@@ -11,6 +14,7 @@ module.exports = async (req, res) => {
   const types = new Set(['receipt','invoice','sponsor_certificate','donor_certificate','membership_certificate','student_certificate','well_wisher_certificate']);
   if (!types.has(b.type)) return res.status(400).json({ error: 'Choose a supported document type.' });
   if (!esc(b.recipient)) return res.status(400).json({ error: 'Recipient name is required.' });
+  if (b.sendEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email || '').trim())) return res.status(400).json({ error: 'Enter a valid recipient email to send the PDF.' });
   const quantity = Math.max(1, Math.min(100, Number(b.quantity) || 1));
   const amount = Math.max(0, Number(b.amount) || 0);
   const currency = esc(process.env.CURRENCY || 'KES');
@@ -28,10 +32,28 @@ module.exports = async (req, res) => {
     const chunks = [];
     pdf.on('data', c => chunks.push(c));
     pdf.on('error', e => { console.error('PDF error', e.message); if (!res.headersSent) res.status(500).end('PDF generation failed'); });
-    pdf.on('end', () => {
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${docNo}.pdf"`);
-      res.status(200).send(Buffer.concat(chunks));
+    pdf.on('end', async () => {
+      try {
+        const pdfBuffer = Buffer.concat(chunks);
+        if (b.sendEmail) {
+          const recipientEmail = String(b.email || '').trim();
+          const title = titleMap[b.type] || 'GEOPRAM DOCUMENT';
+          await sendMail({
+            to: recipientEmail,
+            subject: `${title} - ${docNo}`,
+            text: `Hello ${esc(b.recipient)},\n\nPlease find attached your ${title.toLowerCase()}.\nDocument number: ${docNo}\nIssued by ${company}.\n\nRegards,\n${company}`,
+            html: `<div style="font-family:Arial,sans-serif;color:#172033;max-width:620px;margin:auto;border:1px solid #e4e8ef;border-radius:12px;overflow:hidden"><div style="background:#081321;padding:22px 26px;border-bottom:5px solid #e50914"><div style="font-size:22px;font-weight:800;color:#fff">${company}</div><div style="color:#d8e0ea;font-size:12px;margin-top:5px">Official document delivery</div></div><div style="padding:26px"><p>Hello ${String(b.recipient).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]))},</p><p>Please find your <b>${title.toLowerCase()}</b> attached to this email.</p><p style="padding:14px;background:#f5f7fa;border-radius:8px"><b>Document number:</b> ${docNo}</p><p>Thank you for choosing ${company}.</p></div></div>` ,
+            attachments: [{ filename: `${docNo}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }]
+          });
+          await db.collection('documents').updateOne({ documentNumber: docNo }, { $set: { emailedAt: new Date(), emailedTo: recipientEmail } });
+        }
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${docNo}.pdf"`);
+        res.status(200).send(pdfBuffer);
+      } catch (mailError) {
+        console.error('Document email failed:', mailError.message);
+        if (!res.headersSent) res.status(502).json({ error: 'The PDF was created, but email delivery failed. Check SMTP settings and try again.' });
+      }
     });
     const red = '#e50914', navy = '#071321', grey = '#5b6470';
     const titleMap = {
@@ -40,11 +62,17 @@ module.exports = async (req, res) => {
       student_certificate:'STUDENT CERTIFICATE', well_wisher_certificate:'CERTIFICATE OF APPRECIATION'
     };
     pdf.rect(0,0,595,142).fill(navy);
-    pdf.fillColor(red).rect(54,42,6,58).fill();
-    pdf.fillColor('#ffffff').font('Helvetica-Bold').fontSize(24).text(company,76,42,{width:450});
-    pdf.fillColor('#d9e1eb').font('Helvetica').fontSize(9).text(process.env.COMPANY_ADDRESS || 'Official document',76,75);
+    pdf.fillColor(red).rect(0,136,595,6).fill();
+    const logoPath = path.join(__dirname, '../../public/geopram-logo.png');
+    if (fs.existsSync(logoPath)) {
+      pdf.roundedRect(42,28,158,52,7).fill('#ffffff');
+      try { pdf.image(logoPath, 49, 34, { fit: [144, 40], align: 'center', valign: 'center' }); } catch (logoErr) { console.error('Could not embed company logo:', logoErr.message); }
+    }
+    pdf.fillColor('#ffffff').font('Helvetica-Bold').fontSize(20).text(company,220,37,{width:330});
+    pdf.fillColor('#d9e1eb').font('Helvetica').fontSize(9).text(process.env.COMPANY_ADDRESS || 'Official document • Verified records',220,67,{width:320});
+    pdf.fillColor('#ffffff').font('Helvetica').fontSize(8).text('TRUST • SERVICE • ACCOUNTABILITY',220,88,{width:320,characterSpacing:1.2});
     pdf.fillColor('#ffffff').font('Helvetica-Bold').fontSize(16).text(titleMap[b.type],54,174,{width:487,align:'center'});
-    pdf.moveTo(54,208).lineTo(541,208).lineWidth(1.5).strokeColor(red).stroke();
+    pdf.roundedRect(54,208,487,3,1.5).fill(red);
     pdf.fillColor(grey).font('Helvetica').fontSize(9).text('DOCUMENT NUMBER',54,232);
     pdf.fillColor(navy).font('Helvetica-Bold').fontSize(12).text(docNo,54,248);
     pdf.fillColor(grey).font('Helvetica').fontSize(9).text('DATE ISSUED',360,232);
@@ -75,7 +103,9 @@ module.exports = async (req, res) => {
       pdf.fillColor(red).font('Helvetica-Bold').fontSize(18).text(`${currency} ${(amount*quantity).toLocaleString('en-KE',{minimumFractionDigits:2,maximumFractionDigits:2})}`,420,top+100,{width:121,align:'right'});
       if (b.transactionId) pdf.fillColor(grey).font('Helvetica').fontSize(9).text(`Linked transaction: ${esc(b.transactionId)}`,54,top+150,{width:487});
     }
-    pdf.fillColor(grey).font('Helvetica').fontSize(8).text(`${company} • Thank you for your support. Keep this document for your records.`,54,760,{width:487,align:'center'});
+    pdf.moveTo(54,744).lineTo(541,744).lineWidth(0.7).strokeColor('#dce1e8').stroke();
+    pdf.fillColor(navy).font('Helvetica-Bold').fontSize(8).text(company,54,756,{width:240});
+    pdf.fillColor(grey).font('Helvetica').fontSize(8).text(`Document ${docNo} • Keep this document for your records`,294,756,{width:247,align:'right'});
     pdf.end();
   } catch (e) {
     console.error('Document creation error:', e.message);
