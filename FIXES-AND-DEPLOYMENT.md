@@ -46,3 +46,8 @@ The public page includes a mobile viewport, responsive two-column-to-one-column 
 ## What the “unresolved reason type” message means
 
 That customer-facing message alone does not prove the exact root cause. This version corrects the Buy Goods transaction type, separates `SHORTCODE` from `TILL_NUMBER`, and logs non-secret Daraja response fields when initiation is rejected. If Safaricom accepts the request but the customer still sees the message, inspect the callback's `ResultCode` and `ResultDesc` for that exact `CheckoutRequestID`, and verify the production product/shortcode/passkey assignment in Daraja. Never retry a payment until you have checked whether the customer was debited.
+
+
+## Payment prompt and status popup fix
+
+The public payment page now opens a responsive status modal immediately after Daraja accepts an STK Push. It tells the customer to check their phone and verify the amount and Till before entering a PIN. It then polls the transaction status and displays successful, failed, or cancelled states when the callback has been saved. If Safaricom accepted the request but MongoDB failed immediately afterward, the STK endpoint returns the accepted checkout reference instead of incorrectly telling the customer that the payment could not be started; tracking may be delayed until the callback is stored. This cannot manufacture a Safaricom result: final status still depends on the real callback/database result.

@@ -17,6 +17,7 @@ module.exports = async (req, res) => {
   if (!/^\d{5,20}$/.test(String(SHORTCODE)) || !/^\d{5,20}$/.test(String(TILL_NUMBER))) {
     return res.status(500).json({ error: 'SHORTCODE and TILL_NUMBER must contain digits only. Confirm the values with your Daraja Go Live configuration.' });
   }
+  let acceptedStkResponse = null;
   try {
     const tokenRes = await fetch('https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
       headers: { Authorization: `Basic ${Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SECRET}`).toString('base64')}` }
@@ -50,6 +51,9 @@ module.exports = async (req, res) => {
       const providerMessage = data.errorMessage || data.ResponseDescription;
       return res.status(502).json({ error: providerMessage || 'Safaricom did not accept the payment request. Check the phone number and try again.', providerCode: data.errorCode || data.ResponseCode || null });
     }
+    // From this point, Safaricom has accepted the STK request. Never tell the customer
+    // that initiation failed merely because our database temporarily failed afterward.
+    acceptedStkResponse = data;
     const db = await getDb();
     // Upsert allows a very fast callback to win the race; do not overwrite its final status.
     await db.collection('transactions').updateOne(
@@ -69,7 +73,17 @@ module.exports = async (req, res) => {
     );
     return res.status(200).json({ ResponseCode:'0', CustomerMessage:data.CustomerMessage || 'Payment prompt sent. Check your phone.', CheckoutRequestID:data.CheckoutRequestID });
   } catch (e) {
-    console.error('STK request failed:', e.message);
-    return res.status(500).json({ error: 'Payment could not be started. Please try again later.' });
+    console.error('STK request processing failed:', e.message);
+    if (acceptedStkResponse?.CheckoutRequestID) {
+      // The phone prompt may already be on the customer's phone. Return the accepted
+      // checkout reference so the UI can show the prompt message and poll for callback status.
+      return res.status(200).json({
+        ResponseCode: '0',
+        CustomerMessage: 'Payment request sent. Check your phone and follow the M-Pesa prompt.',
+        CheckoutRequestID: acceptedStkResponse.CheckoutRequestID,
+        trackingWarning: 'Payment request was accepted, but transaction tracking may be delayed.'
+      });
+    }
+    return res.status(500).json({ error: 'M-Pesa could not accept the payment request. Please try again later.' });
   }
 };
