@@ -1,28 +1,34 @@
-module.exports = (req, res) => {
+const { getDb } = require('../lib/db');
+module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).end();
-
-  const body = req.body;
-  console.log('M-Pesa Callback:', JSON.stringify(body, null, 2));
-
-  const stkCallback = body?.Body?.stkCallback;
-
-  if (stkCallback) {
-    const resultCode = stkCallback.ResultCode;
-    const resultDesc = stkCallback.ResultDesc;
-    const merchantRequestID = stkCallback.MerchantRequestID;
-
-    if (resultCode === 0) {
-      const metadata = stkCallback.CallbackMetadata.Item;
-      const amount = metadata.find(i => i.Name === 'Amount')?.Value;
-      const mpesaCode = metadata.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
-      const phone = metadata.find(i => i.Name === 'PhoneNumber')?.Value;
-
-      console.log(`✅ Payment SUCCESS — KES ${amount} from ${phone}, Code: ${mpesaCode}`);
-    } else {
-      console.log(`❌ Payment FAILED — ${resultDesc}`);
+  // Safaricom expects a quick acknowledgement. Persist callback details before acknowledging.
+  try {
+    const callback = req.body?.Body?.stkCallback;
+    if (callback) {
+      const db = await getDb();
+      const success = Number(callback.ResultCode) === 0;
+      const items = callback.CallbackMetadata?.Item || [];
+      const meta = Object.fromEntries(items.map(x => [x.Name, x.Value]));
+      const update = {
+        status: success ? 'paid' : 'failed',
+        resultCode: callback.ResultCode,
+        resultDescription: String(callback.ResultDesc || '').slice(0,300),
+        merchantRequestId: callback.MerchantRequestID || null,
+        checkoutRequestId: callback.CheckoutRequestID || null,
+        updatedAt: new Date()
+      };
+      if (success) {
+        update.amountPaid = Number(meta.Amount || 0);
+        update.mpesaReceiptNumber = String(meta.MpesaReceiptNumber || '');
+        update.paidPhone = String(meta.PhoneNumber || '');
+        if (meta.TransactionDate) update.transactionDate = String(meta.TransactionDate);
+      }
+      await db.collection('transactions').updateOne(
+        { checkoutRequestId: callback.CheckoutRequestID },
+        { $set: update, $setOnInsert: { createdAt: new Date(), currency:'KES', purpose:'M-Pesa payment' } },
+        { upsert: true }
+      );
     }
-  }
-
-  // Always respond 200 to Safaricom
+  } catch (e) { console.error('M-Pesa callback persistence failed:', e.message); }
   return res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
 };

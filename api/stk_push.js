@@ -1,89 +1,47 @@
+const { getDb } = require('../lib/db');
 module.exports = async (req, res) => {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
-  const { phone, amount } = req.body;
-
-  // Validate inputs
-  if (!phone || !amount) {
-    return res.status(400).json({ error: 'Phone and amount are required' });
-  }
-
-  if (!phone.startsWith('254') || phone.length !== 12) {
-    return res.status(400).json({ error: 'Phone must be in format 254XXXXXXXXX' });
-  }
-
-  const CONSUMER_KEY = process.env.CONSUMER_KEY;
-  const CONSUMER_SECRET = process.env.CONSUMER_SECRET;
-  const SHORTCODE = process.env.SHORTCODE;
-  const PASSKEY = process.env.PASSKEY;
-  const CALLBACK_URL = process.env.CALLBACK_URL;
-
+  const { phone, amount, name, email, purpose } = req.body || {};
+  const phoneStr = String(phone || '').replace(/[\s+]/g,'');
+  const value = Number(amount);
+  if (!/^254\d{9}$/.test(phoneStr)) return res.status(400).json({ error: 'Phone must be in format 254XXXXXXXXX.' });
+  if (!Number.isInteger(value) || value < 1 || value > 250000) return res.status(400).json({ error: 'Enter an amount between KES 1 and 250,000.' });
+  const { CONSUMER_KEY, CONSUMER_SECRET, SHORTCODE, PASSKEY, CALLBACK_URL } = process.env;
+  if (![CONSUMER_KEY, CONSUMER_SECRET, SHORTCODE, PASSKEY, CALLBACK_URL].every(Boolean)) return res.status(500).json({ error: 'M-Pesa environment variables are incomplete.' });
   try {
-    // Step 1: Get access token
-    const credentials = Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SECRET}`).toString('base64');
-    
-    const tokenRes = await fetch(
-      'https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
-      { headers: { 'Authorization': `Basic ${credentials}` } }
-    );
-
-    if (!tokenRes.ok) {
-      const errText = await tokenRes.text();
-      return res.status(500).json({ error: 'Failed to get token', details: errText });
-    }
-
-    const tokenData = await tokenRes.json();
-    const token = tokenData.access_token;
-
-    if (!token) {
-      return res.status(500).json({ error: 'No access token returned', details: tokenData });
-    }
-
-    // Step 2: Generate password and timestamp
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[^0-9]/g, '')
-      .slice(0, 14);
-
+    const tokenRes = await fetch('https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+      headers: { Authorization: `Basic ${Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SECRET}`).toString('base64')}` }
+    });
+    if (!tokenRes.ok) { console.error('Daraja token request failed:', tokenRes.status); return res.status(502).json({ error: 'Could not connect to M-Pesa. Please try again.' }); }
+    const { access_token } = await tokenRes.json();
+    if (!access_token) return res.status(502).json({ error: 'M-Pesa did not return an access token.' });
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g,'').slice(0,14);
     const password = Buffer.from(`${SHORTCODE}${PASSKEY}${timestamp}`).toString('base64');
-
-    // Step 3: Initiate STK Push
-    const stkRes = await fetch(
-      'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          BusinessShortCode: '4574727',
-          Password: password,
-          Timestamp: timestamp,
-          TransactionType: 'CustomerBuyGoodsOnline',
-          Amount: parseInt(amount),
-          PartyA: phone,
-          PartyB: '5367886',
-          PhoneNumber: phone,
-          CallBackURL: CALLBACK_URL,
-          AccountReference: 'GeopramGifts',
-          TransactionDesc: 'Donation to Geopram Technologies Gifts'
-        })
-      }
-    );
-
-    const stkData = await stkRes.json();
-    console.log('STK Response:', JSON.stringify(stkData));
-    return res.status(200).json(stkData);
-
-  } catch (err) {
-    console.error('STK Error:', err.message);
-    return res.status(500).json({ error: err.message });
+    const payload = {
+      BusinessShortCode: SHORTCODE, Password: password, Timestamp: timestamp,
+      TransactionType: 'CustomerPayBillOnline', Amount: value, PartyA: phoneStr,
+      PartyB: SHORTCODE, PhoneNumber: phoneStr, CallBackURL: CALLBACK_URL,
+      AccountReference: 'Geopram', TransactionDesc: String(purpose || 'Geopram contribution').slice(0,50)
+    };
+    const stkRes = await fetch('https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest', {
+      method:'POST', headers:{ Authorization:`Bearer ${access_token}`, 'Content-Type':'application/json' }, body:JSON.stringify(payload)
+    });
+    const data = await stkRes.json();
+    if (!stkRes.ok || data.ResponseCode !== '0') return res.status(502).json({ error: data.errorMessage || data.ResponseDescription || 'M-Pesa could not start the payment.' });
+    const db = await getDb();
+    await db.collection('transactions').insertOne({
+      phone: phoneStr, name: String(name || '').slice(0,150), email: String(email || '').slice(0,200),
+      purpose: String(purpose || 'Contribution').slice(0,200), amount: value, currency:'KES',
+      status:'pending', merchantRequestId:data.MerchantRequestID || null,
+      checkoutRequestId:data.CheckoutRequestID || null, createdAt:new Date(), updatedAt:new Date()
+    });
+    return res.status(200).json({ ResponseCode:'0', CustomerMessage:data.CustomerMessage || 'Payment prompt sent. Check your phone.', CheckoutRequestID:data.CheckoutRequestID });
+  } catch (e) {
+    console.error('STK request failed:', e.message);
+    return res.status(500).json({ error: 'Payment could not be started. Please try again later.' });
   }
 };

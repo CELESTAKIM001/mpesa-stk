@@ -1,0 +1,14 @@
+{
+  "name": "geopram-technologies",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Geopram donations, transactions, documents and admin dashboard",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "vercel dev", "check": "node --check api/stk_push.js && node --check api/callback.js && node --check api/admin/login.js && node --check api/admin/records.js && node --check api/admin/document.js" },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.8.0",
+    "pdfkit": "^0.15.0"
+  },
+  "devDependencies": { "vercel": "^39.1.1" }
+}
