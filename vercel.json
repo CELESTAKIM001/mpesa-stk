@@ -1,8 +1,17 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/geopram-console", "destination": "/admin.html" },
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/geopram-console",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/geopram-console/",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

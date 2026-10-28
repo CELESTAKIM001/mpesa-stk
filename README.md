@@ -1,15 +1,15 @@
 # Geopram Technologies — production starter
 
-Donation and M-Pesa STK Push frontend, MongoDB persistence, protected admin dashboard, people/records CRUD, and branded PDF generation.
+Geopram community-support and M-Pesa STK Push frontend, MongoDB persistence, protected admin dashboard, transaction status notifications, SMTP receipts, website directory management, people/records CRUD, and branded PDF generation.
 
 ## Included
-- Responsive Geopram contribution page.
-- M-Pesa Daraja STK push API and callback persistence.
+- Responsive Geopram Community Support page with required customer email and website showcase.
+- M-Pesa Daraja STK push API, callback persistence, transaction status polling, and clear success/failure/cancellation messages.
 - MongoDB collections: `transactions`, `records`, `documents`.
 - Admin login using an HttpOnly, SameSite=Strict, signed 8-hour JWT cookie.
-- Admin dashboard: transactions, people/records create/read/update/delete, PDF creation.
+- Admin dashboard: transactions, manually resend confirmed receipts, manage public website listings and preview images, people/records create/read/update/delete, PDF creation.
 - PDFs: receipts, invoices, sponsor/donor/membership/student/well-wisher certificates.
-- Environment variable template and Vercel configuration.
+- SMTP email delivery configuration and Vercel route handling for the admin page.
 
 ## Deploy to Vercel
 1. Create a MongoDB Atlas cluster and database user. Restrict that user to the project database; allow network access from Vercel as appropriate for your Atlas setup.
