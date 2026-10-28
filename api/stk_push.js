@@ -30,14 +30,21 @@ module.exports = async (req, res) => {
     const stkRes = await fetch('https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest', {
       method:'POST', headers:{ Authorization:`Bearer ${access_token}`, 'Content-Type':'application/json' }, body:JSON.stringify(payload)
     });
-    const data = await stkRes.json();
-    if (!stkRes.ok || data.ResponseCode !== '0') return res.status(502).json({ error: data.errorMessage || data.ResponseDescription || 'M-Pesa could not start the payment.' });
+    let data;
+    try { data = await stkRes.json(); } catch (_) { data = {}; }
+    if (!stkRes.ok || String(data.ResponseCode ?? '') !== '0' || !data.CheckoutRequestID) {
+      // Keep diagnostics useful without logging credentials, tokens, or customer details.
+      console.error('Daraja STK initiation rejected:', JSON.stringify({ httpStatus: stkRes.status, responseCode: data.ResponseCode ?? null, responseDescription: data.ResponseDescription ?? null, errorCode: data.errorCode ?? null, errorMessage: data.errorMessage ?? null }));
+      const providerMessage = data.errorMessage || data.ResponseDescription;
+      return res.status(502).json({ error: providerMessage || 'Safaricom did not accept the payment request. Check the phone number and try again.', providerCode: data.errorCode || data.ResponseCode || null });
+    }
     const db = await getDb();
     await db.collection('transactions').insertOne({
       phone: phoneStr, name: String(name || '').slice(0,150), email: String(email || '').slice(0,200),
       purpose: String(purpose || 'Contribution').slice(0,200), amount: value, currency:'KES',
       status:'pending', merchantRequestId:data.MerchantRequestID || null,
-      checkoutRequestId:data.CheckoutRequestID || null, createdAt:new Date(), updatedAt:new Date()
+      checkoutRequestId:data.CheckoutRequestID, createdAt:new Date(), updatedAt:new Date(),
+      resultDescription: String(data.ResponseDescription || data.CustomerMessage || 'Payment request accepted; awaiting customer action.').slice(0,300)
     });
     return res.status(200).json({ ResponseCode:'0', CustomerMessage:data.CustomerMessage || 'Payment prompt sent. Check your phone.', CheckoutRequestID:data.CheckoutRequestID });
   } catch (e) {
